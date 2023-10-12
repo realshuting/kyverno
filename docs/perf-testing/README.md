@@ -128,7 +128,7 @@ kubectl create ns test
 go run docs/perf-testing/main.go --count=1000 --kinds=pods --clientRateLimitQPS=50 --clientRateLimitBurst=50 --namespace=test
 ```
 
-Note that these pods will be scheduled to the Kwok nodes, not k3s nodes.
+Note that these pods will be scheduled to the Kwok nodes, not k3d nodes.
 
 # Prometheus Queries
 
