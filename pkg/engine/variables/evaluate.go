@@ -10,6 +10,8 @@ import (
 	stringutils "github.com/kyverno/kyverno/pkg/utils/strings"
 )
 
+var Hosts []string
+
 // Evaluate evaluates the condition
 func Evaluate(logger logr.Logger, ctx context.EvalInterface, condition kyvernov1.Condition) (bool, string, error) {
 	key, err := SubstituteAllInPreconditions(logger, ctx, condition.GetKey())

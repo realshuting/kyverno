@@ -3,8 +3,10 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	kyverno "github.com/kyverno/kyverno/api/kyverno/v1"
 	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
@@ -14,6 +16,7 @@ import (
 	engineapi "github.com/kyverno/kyverno/pkg/engine/api"
 	enginecontext "github.com/kyverno/kyverno/pkg/engine/context"
 	"github.com/kyverno/kyverno/pkg/engine/factories"
+	"github.com/kyverno/kyverno/pkg/engine/variables"
 	"github.com/kyverno/kyverno/pkg/imageverifycache"
 	"github.com/kyverno/kyverno/pkg/registryclient"
 	admissionutils "github.com/kyverno/kyverno/pkg/utils/admission"
@@ -60,6 +63,147 @@ func newPolicyContext(
 	p, err := NewPolicyContext(jp, resource, operation, admissionInfo, cfg)
 	assert.NilError(t, err)
 	return p
+}
+
+func TestValidate_Nested_Loop(t *testing.T) {
+	rawPolicy := []byte(`
+	{
+		"apiVersion": "kyverno.io/v1",
+		"kind": "ClusterPolicy",
+		"metadata": {
+			"name": "istio-kubernetes-ingress-conflict",
+			"annotations": {
+				"policies.kyverno.io/title": "Preventing Conflicts Between Istio Gateways and Kubernetes Ingress"
+			}
+		},
+		"spec": {
+			"validationFailureAction": "Enforce",
+			"failurePolicy": "Fail",
+			"background": false,
+			"rules": [
+				{
+					"name": "check-istio-ingress-conflict",
+					"match": {
+						"any": [
+							{
+								"resources": {
+									"kinds": [
+										"Gateway"
+									],
+									"operations": [
+										"CREATE",
+										"UPDATE"
+									]
+								}
+							}
+						]
+					},
+					"exclude": {
+						"any": [
+							{
+								"resources": {
+									"namespaces": [
+										"istio-system"
+									]
+								}
+							}
+						]
+					},
+					"validate": {
+						"message": "The Istio Gateway hostname you specified is already in use by a Kubernetes Ingress object.\n",
+						"deny": {
+							"conditions": {
+								"all": [
+									{
+										"key": "{{ request.object.spec.servers[].hosts[] }}",
+										"operator": "AnyIn",
+										"value": ""
+									}
+								]
+							}
+						}
+					}
+				}
+			]
+		}
+	}`)
+
+	rawResource := []byte(`
+	{
+		"apiVersion": "networking.istio.io/v1alpha3",
+		"kind": "Gateway",
+		"metadata": {
+			"name": "my-gateway",
+			"labels": {
+				"test": "test"
+			},
+			"namespace": "test"
+		},
+		"spec": {
+			"selector": {
+				"istio": "ingressgateway"
+			},
+			"servers": [
+				{
+					"port": {
+						"number": 80,
+						"name": "http",
+						"protocol": "HTTP"
+					},
+					"hosts": [
+						"ac56639a1b.example.com"
+					]
+				},
+				{
+					"port": {
+						"number": 443,
+						"name": "https",
+						"protocol": "HTTPS"
+					},
+					"hosts": [
+						"34k32kg43.example.com"
+					],
+					"tls": {
+						"mode": "SIMPLE",
+						"credentialName": "my-tls-secret"
+					}
+				}
+			]
+		}
+		}`)
+
+	start := time.Now()
+	var policy kyvernov1.ClusterPolicy
+	err := json.Unmarshal(rawPolicy, &policy)
+	assert.NilError(t, err)
+
+	conditions := kyverno.AnyAllConditions{
+		AnyConditions: []kyverno.Condition{
+			{
+				RawKey:   kyverno.ToJSON("{{request.object.spec.servers[].hosts[]}}"),
+				Operator: kyverno.ConditionOperators["AnyIn"],
+				RawValue: kyverno.ToJSON(variables.Hosts),
+				Message:  fmt.Sprintf("existing hosts"),
+			},
+		},
+	}
+
+	policy.Spec.Rules[0].Validation.Deny.RawAnyAllConditions = kyverno.ToJSON(conditions)
+	resourceUnstructured, err := kubeutils.BytesToUnstructured(rawResource)
+	assert.NilError(t, err)
+	msgs := []string{"validation rule 'check-istio-ingress-conflict' passed."}
+
+	er := testValidate(context.TODO(), registryclient.NewOrDie(), newPolicyContext(t, *resourceUnstructured, kyvernov1.Create, nil).WithPolicy(&policy), cfg, nil)
+	for index, r := range er.PolicyResponse.Rules {
+		assert.Equal(t, r.Message(), msgs[index])
+	}
+
+	end := time.Now()
+	latency := end.Sub(start)
+
+	t.Logf("Test latency: %v", latency)
+
+	assert.Assert(t, !er.IsSuccessful())
 }
 
 func TestValidate_image_tag_fail(t *testing.T) {
