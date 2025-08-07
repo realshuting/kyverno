@@ -5,7 +5,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
-// random comment
 // MatchResources is used to specify resource and admission review request data for
 // which a policy rule is applicable.
 // +kubebuilder:not:={required:{any,all}}
