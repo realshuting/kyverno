@@ -15,9 +15,18 @@ type ValidatingPolicyAutogenStatus struct {
 	Configs map[string]ValidatingPolicyAutogen `json:"configs,omitempty"`
 }
 
+type ImageValidatingPolicyAutogenStatus struct {
+	Configs map[string]ImageValidatingPolicyAutogen `json:"configs,omitempty"`
+}
+
 type ValidatingPolicyAutogen struct {
 	Targets []Target              `json:"targets"`
 	Spec    *ValidatingPolicySpec `json:"spec"`
+}
+
+type ImageValidatingPolicyAutogen struct {
+	Targets []Target                   `json:"targets"`
+	Spec    *ImageValidatingPolicySpec `json:"spec"`
 }
 
 type MutatingPolicyAutogenStatus struct {
